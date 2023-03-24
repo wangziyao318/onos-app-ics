@@ -52,17 +52,13 @@ public class AppComponent implements SomeInterface {
     @Activate
     protected void activate() {
         cfgService.registerProperties(getClass());
-        System.out.println("ACTIVATE");
         log.info("Started");
-        log.error("START ERROR");
     }
 
     @Deactivate
     protected void deactivate() {
         cfgService.unregisterProperties(getClass(), false);
-        System.out.println("DEACTIVATE");
         log.info("Stopped");
-        log.error("END ERROR");
     }
 
     @Modified
