@@ -15,7 +15,13 @@
  */
 package org.onosproject.ics;
 
+import org.onlab.packet.Ethernet;
 import org.onosproject.cfg.ComponentConfigService;
+import org.onosproject.net.HostId;
+import org.onosproject.net.packet.InboundPacket;
+import org.onosproject.net.packet.PacketContext;
+import org.onosproject.net.packet.PacketProcessor;
+import org.onosproject.net.packet.PacketService;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -35,44 +41,71 @@ import static org.onlab.util.Tools.get;
  * Skeletal ONOS application component.
  */
 @Component(immediate = true,
-           service = {SomeInterface.class},
-           property = {
-               "someProperty=Some Default String Value",
-           })
+		service = {SomeInterface.class},
+		property = {
+				"someProperty=Some Default String Value",
+		})
 public class AppComponent implements SomeInterface {
 
-    private final Logger log = LoggerFactory.getLogger(getClass());
+	private final Logger log = LoggerFactory.getLogger(getClass());
 
-    /** Some configurable property. */
-    private String someProperty;
+	/** Some configurable property. */
+	private String someProperty;
 
-    @Reference(cardinality = ReferenceCardinality.MANDATORY)
-    protected ComponentConfigService cfgService;
+	@Reference(cardinality = ReferenceCardinality.MANDATORY)
+	protected ComponentConfigService cfgService;
 
-    @Activate
-    protected void activate() {
-        cfgService.registerProperties(getClass());
-        log.info("Started");
-    }
+	@Reference(cardinality = ReferenceCardinality.MANDATORY)
+	protected PacketService packetService;
 
-    @Deactivate
-    protected void deactivate() {
-        cfgService.unregisterProperties(getClass(), false);
-        log.info("Stopped");
-    }
+	private ReactivePacketProcessor processor = new ReactivePacketProcessor();
 
-    @Modified
-    public void modified(ComponentContext context) {
-        Dictionary<?, ?> properties = context != null ? context.getProperties() : new Properties();
-        if (context != null) {
-            someProperty = get(properties, "someProperty");
-        }
-        log.info("Reconfigured");
-    }
+	@Activate
+	protected void activate() {
+		cfgService.registerProperties(getClass());
+		packetService.addProcessor(processor, PacketProcessor.director(3));
+		log.info("Started");
+	}
 
-    @Override
-    public void someMethod() {
-        log.info("Invoked");
-    }
+	@Deactivate
+	protected void deactivate() {
+		cfgService.unregisterProperties(getClass(), false);
+		log.info("Stopped");
+	}
 
+	@Modified
+	public void modified(ComponentContext context) {
+		Dictionary<?, ?> properties = context != null ? context.getProperties() : new Properties();
+		if (context != null) {
+			someProperty = get(properties, "someProperty");
+		}
+		log.info("Reconfigured");
+	}
+
+	@Override
+	public void someMethod() {
+		log.info("Invoked");
+	}
+
+	/**
+	 * Packet processor responsible for forwarding packets along their paths.
+	 */
+	private class ReactivePacketProcessor implements PacketProcessor {
+
+		@Override
+		public void process(PacketContext context) {
+			if (context.isHandled()) {
+				return;
+			}
+			InboundPacket pkt = context.inPacket();
+			Ethernet ethPkt = pkt.parsed();
+
+			if (ethPkt == null) {
+				return;
+			}
+
+			HostId srcId = HostId.hostId(ethPkt.getSourceMAC());
+			HostId dstId = HostId.hostId(ethPkt.getDestinationMAC());
+		}
+	}
 }

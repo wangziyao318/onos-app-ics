@@ -28,16 +28,16 @@
     <version>1.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
 
-    <description>ONOS OSGi bundle archetype</description>
-    <url>https://onosproject.org</url>
+    <description>An ONOS App for industrial control system</description>
+    <url>https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3</url>
 
     <properties>
         <onos.app.name>org.onosproject.ics</onos.app.name>
         <onos.app.title>AAA ICS App</onos.app.title>
         <onos.app.origin>Ziyao Wang</onos.app.origin>
         <onos.app.category>default</onos.app.category>
-        <onos.app.url>https://onosproject.org</onos.app.url>
-        <onos.app.readme>ONOS OSGi bundle archetype.</onos.app.readme>
+        <onos.app.url>https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3</onos.app.url>
+        <onos.app.readme>An ONOS App for industrial control system.</onos.app.readme>
     </properties>
 
     <dependencies>
@@ -81,11 +81,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
-                <!-- Uncomment to disable checkstyle validation
-                <configuration>
-                    <skip>true</skip>
-                </configuration>
-                -->
             </plugin>
         </plugins>
     </build>

@@ -17,6 +17,6 @@ package org.onosproject.ics;
 
 public interface SomeInterface {
 
-    void someMethod();
+	void someMethod();
 
 }
