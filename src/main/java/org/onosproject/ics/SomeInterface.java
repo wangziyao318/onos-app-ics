@@ -15,8 +15,12 @@
  */
 package org.onosproject.ics;
 
+/**
+ * Some interface.
+ */
 public interface SomeInterface {
-
-	void someMethod();
-
+    /**
+     * Some method.
+     */
+    void someMethod();
 }
