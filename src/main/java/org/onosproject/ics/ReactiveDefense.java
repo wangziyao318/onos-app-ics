@@ -123,6 +123,8 @@ public class ReactiveDefense implements SomeInterface {
             flowRuleService.purgeFlowRules(availableDevice.id());
         }
 
+        // we can only use logic port 1,2, but we can't always ensure port1==eth1, port2==eth2.
+        // So, don't change port config, just remain all bridge and all ports intact
         for (int i = 1; i <= 2; ++i) {
             TrafficSelector objectiveSelector = DefaultTrafficSelector.builder()
                     .matchInPort(PortNumber.portNumber(i))
