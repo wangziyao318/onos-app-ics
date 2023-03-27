@@ -15,12 +15,19 @@
  */
 package org.onosproject.ics;
 
+import org.onosproject.net.Device;
+import org.onosproject.net.PortNumber;
+import org.onosproject.net.packet.PacketContext;
+
 /**
  * Some interface.
  */
-public interface SomeInterface {
+public interface ReactiveDefenseService {
     /**
-     * Some method.
+     * Initialize default flows in OVS.
+     * ovs-ofctl add-flow br0 in_port=1,actions=output:2,controller
+     * ovs-ofctl add-flow br0 in_port=2,actions=output:1,controller
+     * @param newAvailableDevices New available devices
      */
-    void someMethod();
+    void initFlows(Iterable<Device> newAvailableDevices);
 }

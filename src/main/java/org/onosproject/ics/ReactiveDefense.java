@@ -16,6 +16,8 @@
 package org.onosproject.ics;
 
 import org.onlab.packet.Ethernet;
+import org.onlab.packet.IPacket;
+import org.onlab.util.Tools;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
@@ -35,7 +37,6 @@ import org.onosproject.net.flowobjective.DefaultForwardingObjective;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
 import org.onosproject.net.flowobjective.ForwardingObjective;
 import org.onosproject.net.host.HostService;
-import org.onosproject.net.packet.InboundPacket;
 import org.onosproject.net.packet.PacketContext;
 import org.onosproject.net.packet.PacketProcessor;
 import org.onosproject.net.packet.PacketService;
@@ -50,24 +51,26 @@ import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collection;
 import java.util.Dictionary;
 import java.util.Properties;
-
-import static org.onlab.util.Tools.get;
 
 /**
  * An ONOS App for industrial control system.
  */
 @Component(immediate = true,
-        service = {SomeInterface.class},
+        service = {ReactiveDefenseService.class},
         property = {
-                "someProperty=Some Default String Value",
+                "someProperty=Some Default String Value"
         })
-public class ReactiveDefense implements SomeInterface {
+public class ReactiveDefense implements ReactiveDefenseService {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
-
     private String someProperty;
+    private ReactivePacketProcessor processor;
+    private InnerDeviceListener deviceListener;
+    private ApplicationId appId;
+    private Iterable<Device> availableDevices;
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected CoreService coreService;
@@ -93,96 +96,94 @@ public class ReactiveDefense implements SomeInterface {
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected DeviceService deviceService;
 
-    private ReactivePacketProcessor processor;
-    private InnerDeviceListener deviceListener;
-    private ApplicationId appId;
-
     @Activate
     protected void activate() {
-        cfgService.registerProperties(getClass());
 
-        // register always produces the same appId
+        cfgService.registerProperties(getClass());
         appId = coreService.registerApplication("org.onosproject.ics");
 
         deviceListener = new InnerDeviceListener();
         deviceService.addListener(deviceListener);
         processor = new ReactivePacketProcessor();
-        packetService.addProcessor(processor, PacketProcessor.director(2));
+        packetService.addProcessor(processor, PacketProcessor.director(3));
 
-        /* initialize flows: all traffic sent to controller:65535 */
-        Iterable<Device> devices = deviceService.getDevices();
-        Iterable<Device> availableDevices = deviceService.getAvailableDevices();
+        availableDevices = deviceService.getAvailableDevices(Device.Type.SWITCH);
+        initFlows(availableDevices);
 
-        for (Device device : devices) {
-            log.info("device-id: " + device.id());
-        }
-
-        for (Device availableDevice : availableDevices) {
-            log.error("available-device-id: " + availableDevice.id());
-            // purge all old flow rules in OVSes
-            flowRuleService.purgeFlowRules(availableDevice.id());
-        }
-
-        // we can only use logic port 1,2, but we can't always ensure port1==eth1, port2==eth2.
-        // So, don't change port config, just remain all bridge and all ports intact
-        for (int i = 1; i <= 2; ++i) {
-            TrafficSelector objectiveSelector = DefaultTrafficSelector.builder()
-                    .matchInPort(PortNumber.portNumber(i))
-                    .build();
-            // not only output eth1/2, but also sent to controller
-            TrafficTreatment defaultTreatment = DefaultTrafficTreatment.builder()
-                    .setOutput(PortNumber.portNumber(3 - i))
-                    .setOutput(PortNumber.CONTROLLER)
-                    .build();
-
-            ForwardingObjective objective = DefaultForwardingObjective.builder()
-                    .withSelector(objectiveSelector)
-                    .withTreatment(defaultTreatment)
-                    .fromApp(appId)
-                    .withPriority(10)
-                    .makeTemporary(10)
-                    .withFlag(ForwardingObjective.Flag.VERSATILE)
-                    .add();
-
-            for (Device availableDevice : availableDevices) {
-                flowObjectiveService.forward(availableDevice.id(), objective);
-            }
-        }
-
-        Iterable<Host> hosts = hostService.getHosts();
-        for (Host host : hosts) {
-            log.error("known host: " + host);
-        }
-
-
-        log.info("===== Started id=" + appId.id() + " =====");
+        log.info(" ___    ____   ____      ____  _____ _____ _____ _   _ ____  _____");
+        log.info("|_ _|  / ___| / ___|    |  _ \\| ____|  ___| ____| \\ | / ___|| ____|");
+        log.info(" | |  | |     \\___ \\    | | | |  _| | |_  |  _| |  \\| \\___ \\|  _|");
+        log.info(" | |  | |___   ___) |   | |_| | |___|  _| | |___| |\\  |___) | |___");
+        log.info("|___|  \\____| |____/    |____/|_____|_|   |_____|_| \\_|____/|_____|");
+        log.info("Started appId=" + appId.id());
     }
 
     @Deactivate
     protected void deactivate() {
+
         cfgService.unregisterProperties(getClass(), false);
 
         flowRuleService.removeFlowRulesById(appId);
-        deviceService.removeListener(deviceListener);
         packetService.removeProcessor(processor);
-        deviceListener = null;
         processor = null;
+        deviceService.removeListener(deviceListener);
+        deviceListener = null;
+
+        log.info(" ___    ____   ____      ____  _____ _____ _____ _   _ ____  _____");
+        log.info("|_ _|  / ___| / ___|    |  _ \\| ____|  ___| ____| \\ | / ___|| ____|");
+        log.info(" | |  | |     \\___ \\    | | | |  _| | |_  |  _| |  \\| \\___ \\|  _|");
+        log.info(" | |  | |___   ___) |   | |_| | |___|  _| | |___| |\\  |___) | |___");
+        log.info("|___|  \\____| |____/    |____/|_____|_|   |_____|_| \\_|____/|_____|");
+        log.info("Stopped appId=" + appId.id());
         appId = null;
-        log.info("===== Stopped =====");
     }
 
     @Modified
     public void modified(ComponentContext context) {
+
         Dictionary<?, ?> properties = context != null ? context.getProperties() : new Properties();
         if (context != null) {
-            someProperty = get(properties, "someProperty");
+            someProperty = Tools.get(properties, "someProperty");
         }
-        log.info("===== Reconfigured =====");
+        log.info("Reconfigured appId=" + appId.id());
     }
 
     @Override
-    public void someMethod() {
-        log.info("Invoked");
+    public void initFlows(Iterable<Device> newAvailableDevices) {
+
+        for (Device device : newAvailableDevices) {
+            flowRuleService.purgeFlowRules(device.id());
+
+            // port 1 == eth1, port 2 == eth2 by default, if bridges and ports are not modified
+            for (int i = 1; i <= 2; ++i) {
+                // in_port=1/2
+                TrafficSelector initSelector = DefaultTrafficSelector.builder()
+                        .matchInPort(PortNumber.portNumber(i))
+                        .build();
+                // actions=output:1/2,controller
+                TrafficTreatment initTreatment = DefaultTrafficTreatment.builder()
+                        .setOutput(PortNumber.portNumber(3 - i))
+                        .setOutput(PortNumber.CONTROLLER)
+                        .build();
+
+                ForwardingObjective initObjective = DefaultForwardingObjective.builder()
+                        .withSelector(initSelector)
+                        .withTreatment(initTreatment)
+                        .fromApp(appId)
+                        .withPriority(10)
+                        .makeTemporary(10)
+                        .withFlag(ForwardingObjective.Flag.VERSATILE)
+                        .add();
+
+                flowObjectiveService.forward(device.id(), initObjective);
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    log.error(e.getMessage());
+                }
+                log.debug("Installed flow: " + initObjective);
+            }
+        }
     }
 
     /**
@@ -191,101 +192,58 @@ public class ReactiveDefense implements SomeInterface {
     private class ReactivePacketProcessor implements PacketProcessor {
         @Override
         public void process(PacketContext context) {
+
             if (context.isHandled()) {
-                log.error("pkt has been handled: " + context.inPacket().parsed());
+                log.error("onos-app-ics is incompatible with onos-app-fwd");
                 return;
             }
 
-            InboundPacket pkt = context.inPacket();
-            Ethernet ethPkt = pkt.parsed();
-
+            Ethernet ethPkt = context.inPacket().parsed();
             if (ethPkt == null) {
-                log.error("not an ethernet pkt !!!!! Maybe corrupted");
+                log.error("Corrupted ethernet packet");
                 return;
             }
 
-            if (ethPkt.getEtherType() == Ethernet.TYPE_LLDP || ethPkt.getEtherType() == Ethernet.TYPE_BSN) {
-                log.error("bail all control packets");
-                return;
+            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+                IPacket ipPkt = ethPkt.getPayload();
+                log.error("IP packet: " + ipPkt);
+                log.error("IP packet payload (TCP/UDP???): " + ipPkt.getPayload());
             }
 
-            HostId dstId = HostId.hostId(ethPkt.getDestinationMAC());
-
-            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV4 && dstId.mac().isMulticast()) {
-                log.error("not process IPv4 multicast pkt");
-                return;
+            // check if packet dst is one of known neighbours of OVS
+            if (hostService.getHost(HostId.hostId(ethPkt.getDestinationMAC())) == null) {
+                log.error("dst host unknown");
+            } else {
+                log.info("dst host known");
             }
-
-            Host dst = hostService.getHost(dstId);
-            // pkt dst host not known, for example: ping 10.0.0.4 which is invalid ip addr
-            if (dst == null) {
-                flood(context);
-                return;
-            }
-
-            log.error("we know the pkt dst host, and we can now deploy flows to forward it. " +
-                    "The pkt payload is: " + ethPkt.getPayload());
         }
     }
 
     /**
-     * Listen all device event.
+     * Listen for device availability to initialize flows.
      */
     private class InnerDeviceListener implements DeviceListener {
         @Override
         public void event(DeviceEvent event) {
             switch (event.type()) {
-                case DEVICE_AVAILABILITY_CHANGED:
-                    log.error("device availability changed");
+                case DEVICE_AVAILABILITY_CHANGED: case DEVICE_ADDED:
+                    log.debug(event.type().name());
+
+                    Collection<Device> currentAvailableDevices = (Collection<Device>) deviceService
+                            .getAvailableDevices(Device.Type.SWITCH);
+                    currentAvailableDevices.removeAll((Collection<Device>) availableDevices);
+                    availableDevices = deviceService.getAvailableDevices(Device.Type.SWITCH);
+
+                    if (!currentAvailableDevices.isEmpty()) {
+                        for (Device device : currentAvailableDevices) {
+                            log.info("New available device: " + device);
+                        }
+                        initFlows(currentAvailableDevices);
+                    }
                     break;
-                case DEVICE_ADDED:
-                    log.error("new device added");
-                    break;
-                case DEVICE_REMOVED:
-                    log.error("device removed");
-                    break;
-                case PORT_ADDED:
-                    log.error("port added");
-                    break;
-                case PORT_REMOVED:
-                    log.error("port removed");
-                    break;
-                case PORT_UPDATED:
-                    log.error("port updated");
-                    break;
-                case DEVICE_UPDATED:
-                    log.error("device updated");
-                    break;
-                case DEVICE_SUSPENDED:
-                    log.error("device suspended");
-                    break;
-                default: // PORT_STATS_UPDATED: very commonly seen
+                default:
                     break;
             }
         }
-    }
-
-    /**
-     * Floods the specified packet if permissible.
-     * @param context packet
-     */
-    private void flood(PacketContext context) {
-        if (topologyService.isBroadcastPoint(topologyService.currentTopology(), context.inPacket().receivedFrom())) {
-            log.error("flood pkt sent: " + context.inPacket().parsed());
-            packetOut(context, PortNumber.FLOOD);
-        } else {
-            log.error("flood pkt blocked: " + context.inPacket().parsed());
-            context.block();
-        }
-    }
-
-    /**
-     * Sends a packet out the specified port.
-     * @param context packet
-     * @param portNumber output port
-     */
-    private void packetOut(PacketContext context, PortNumber portNumber) {
-        context.treatmentBuilder().setOutput(portNumber);
-        context.send();
     }
 }
