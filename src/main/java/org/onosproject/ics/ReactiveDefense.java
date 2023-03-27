@@ -15,15 +15,17 @@
  */
 package org.onosproject.ics;
 
+import org.onlab.packet.Data;
 import org.onlab.packet.Ethernet;
+import org.onlab.packet.ICMP;
+import org.onlab.packet.ICMPEcho;
 import org.onlab.packet.IPacket;
+import org.onlab.packet.TCP;
 import org.onlab.util.Tools;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.net.Device;
-import org.onosproject.net.Host;
-import org.onosproject.net.HostId;
 import org.onosproject.net.PortNumber;
 import org.onosproject.net.device.DeviceEvent;
 import org.onosproject.net.device.DeviceListener;
@@ -36,11 +38,9 @@ import org.onosproject.net.flow.TrafficTreatment;
 import org.onosproject.net.flowobjective.DefaultForwardingObjective;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
 import org.onosproject.net.flowobjective.ForwardingObjective;
-import org.onosproject.net.host.HostService;
 import org.onosproject.net.packet.PacketContext;
 import org.onosproject.net.packet.PacketProcessor;
 import org.onosproject.net.packet.PacketService;
-import org.onosproject.net.topology.TopologyService;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -74,25 +74,14 @@ public class ReactiveDefense implements ReactiveDefenseService {
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected CoreService coreService;
-
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected ComponentConfigService cfgService;
-
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected PacketService packetService;
-
-    @Reference(cardinality = ReferenceCardinality.MANDATORY)
-    protected HostService hostService;
-
-    @Reference(cardinality = ReferenceCardinality.MANDATORY)
-    protected TopologyService topologyService;
-
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected FlowObjectiveService flowObjectiveService;
-
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected FlowRuleService flowRuleService;
-
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected DeviceService deviceService;
 
@@ -171,16 +160,11 @@ public class ReactiveDefense implements ReactiveDefenseService {
                         .withTreatment(initTreatment)
                         .fromApp(appId)
                         .withPriority(10)
-                        .makeTemporary(10)
+                        .makePermanent()
                         .withFlag(ForwardingObjective.Flag.VERSATILE)
                         .add();
 
                 flowObjectiveService.forward(device.id(), initObjective);
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    log.error(e.getMessage());
-                }
                 log.debug("Installed flow: " + initObjective);
             }
         }
@@ -204,23 +188,60 @@ public class ReactiveDefense implements ReactiveDefenseService {
                 return;
             }
 
-            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+            // Inspects only IPv4 unicast packets
+            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV4 && !ethPkt.getDestinationMAC().isMulticast()) {
+                /*
+                 IPv4{version=4, headerLength=5, diffServ=0, totalLength=60, identification=-22319,
+                 flags=2, fragmentOffset=0, ttl=61, protocol=6, checksum=-5073,
+                 sourceAddress=-1408224767, destinationAddress=-1062729215, options=null, isTruncated=false}
+                */
                 IPacket ipPkt = ethPkt.getPayload();
-                log.error("IP packet: " + ipPkt);
-                log.error("IP packet payload (TCP/UDP???): " + ipPkt.getPayload());
-            }
 
-            // check if packet dst is one of known neighbours of OVS
-            if (hostService.getHost(HostId.hostId(ethPkt.getDestinationMAC())) == null) {
-                log.error("dst host unknown");
-            } else {
-                log.info("dst host known");
+                /*
+                 TCP{sourcePort=49334, destinationPort=502, sequence=-1638985037, acknowledge=-244341676,
+                 dataOffset=8, flags=16, windowSize=126, checksum=-6849, urgentPointer=0,
+                 options=[1, 1, 8, 10, 93, -26, -38, 27, -50, 60, -40, -111]}
+
+                 ICMP{icmpType=8, icmpCode=0, checksum=28508}
+                */
+                IPacket tcpPkt = ipPkt.getPayload();
+                if (tcpPkt == null) {
+                    return;
+                } else if (tcpPkt instanceof TCP) {
+                    log.info("TCP packet: " + tcpPkt);
+                } else if (tcpPkt instanceof ICMP) {
+                    log.info("ICMP packet: " + tcpPkt);
+                } else {
+                    log.error("unknown 'TCP' packet: " + tcpPkt);
+                }
+
+                /*
+                 ICMPEcho{ICMP echo identifier=-26674, ICMP echo sequenceNumber=0}
+
+                 Data{data=[0, 0, 0, 0, 0, 6, 1, 1, 0, 0, 0, 1]}
+                 Data{data=[]}
+                 */
+                IPacket modbusPkt = tcpPkt.getPayload();
+                if (modbusPkt == null) {
+                    return;
+                } else if (modbusPkt instanceof ICMPEcho) {
+                    log.info("ICMPEcho packet: " + modbusPkt);
+                } else if (modbusPkt instanceof Data) {
+                    log.info("Modbus packet: " + modbusPkt);
+                } else {
+                    log.error("unknown 'modbus' packet: " + modbusPkt);
+                }
+
+                /*
+                 Data{data=[-99, 64, 83, -108, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}
+                 */
             }
         }
     }
 
     /**
-     * Listen for device availability to initialize flows.
+     * Listens for device availability to initialize flows.
      */
     private class InnerDeviceListener implements DeviceListener {
         @Override

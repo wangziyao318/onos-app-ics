@@ -16,8 +16,6 @@
 package org.onosproject.ics;
 
 import org.onosproject.net.Device;
-import org.onosproject.net.PortNumber;
-import org.onosproject.net.packet.PacketContext;
 
 /**
  * Some interface.
