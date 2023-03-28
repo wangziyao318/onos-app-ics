@@ -116,64 +116,8 @@ public class ReactiveDefense implements ReactiveDefenseService {
         log.info("|___|  \\____| |____/    |____/|_____|_|   |_____|_| \\_|____/|_____|");
         log.info("Started appId=" + appId.id());
 
-        // modbus traffic monitor
-        t = new Thread(() -> {
-            while (!Thread.interrupted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    return;
-                }
-
-                if (ethList.size() > 2) {
-                    log.error("Modbus DoS detected with a frequency of " + ethList.size() + "pkt/s");
-
-                    HashMap<MacAddress, Integer> map = new HashMap<>();
-
-                    for (Ethernet ethPkt : ethList) {
-                        if (map.containsKey(ethPkt.getSourceMAC())) {
-                            int count = map.get(ethPkt.getSourceMAC());
-                            map.put(ethPkt.getSourceMAC(), count + 1);
-                        } else {
-                            map.put(ethPkt.getSourceMAC(), 1);
-                        }
-                    }
-
-                    int maxCount = Collections.max(map.values());
-                    MacAddress attacker = MacAddress.NONE;
-                    for (Map.Entry<MacAddress, Integer> entry : map.entrySet()) {
-                        if (entry.getValue() == maxCount) {
-                            attacker = entry.getKey();
-                        }
-                    }
-
-                    /*
-                     Temporarily blocks Dos Modbus packets.
-                     Uses SrcMAC approach is more robust than SrcIP
-                     */
-                    for (Device device : availableDevices) {
-                        flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
-                                .fromApp(appId).makeTemporary(10).withFlag(ForwardingObjective.Flag.SPECIFIC)
-                                .withPriority(10000)
-                                .withSelector(DefaultTrafficSelector.builder()
-                                        .matchEthSrc(attacker)
-                                        .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
-                                        .matchIPDst(Ip4Prefix.valueOf("192.168.0.0/16"))
-                                        .matchIPProtocol((byte) IpProtocol.TCP.value())
-                                        .matchTcpDst(TpPort.tpPort(502))
-                                        .build())
-                                .withTreatment(DefaultTrafficTreatment.builder()
-                                        .drop()
-                                        .build())
-                                .add()
-                        );
-                        log.info("Defense flow deployed on " + device.id());
-                    }
-                }
-
-                ethList.clear();
-            }
-        });
+        // Starts modbus traffic monitor
+        t = new Thread(new ModbusTrafficMonitor());
         t.start();
     }
 
@@ -247,7 +191,7 @@ public class ReactiveDefense implements ReactiveDefenseService {
 
             /*
              By default, drop all requests to Modbus server.
-             Since OpenPLC won't send message deliberately, we don't need to handle tcpSrcPort==502 case.
+             Since OpenPLC server won't send message deliberately, we don't need to consider tcpSrcPort==502.
              Drops all Modbus/TCP traffic whose dstTcpPort==502, with priority 50.
              */
             flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
@@ -286,6 +230,49 @@ public class ReactiveDefense implements ReactiveDefenseService {
                             .build())
                     .add()
             );
+
+            /*
+             Start project-specific flows
+
+             Allows the attacker's modbus/TCP traffic, with priority 100.
+             For Attack & Defense project only, it's advised to remove these 2 flows in normal usage.
+             From any OpenPLC 192.168.0.0/16 to OpenPLC 192.168.0.0/16 whose tcpDstPort==502.
+            */
+            flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
+                    .fromApp(appId).makePermanent().withFlag(ForwardingObjective.Flag.SPECIFIC)
+                    .withPriority(100)
+                    .withSelector(DefaultTrafficSelector.builder()
+                            .matchInPort(PortNumber.portNumber(2))
+                            .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
+                            .matchIPSrc(Ip4Prefix.valueOf("192.168.0.0/16"))
+                            .matchIPDst(Ip4Prefix.valueOf("192.168.0.0/16"))
+                            .matchIPProtocol((byte) IpProtocol.TCP.value())
+                            .matchTcpDst(TpPort.tpPort(502))
+                            .build())
+                    .withTreatment(DefaultTrafficTreatment.builder()
+                            .setOutput(PortNumber.portNumber(1))
+                            .setOutput(PortNumber.CONTROLLER)
+                            .build())
+                    .add()
+            );
+            flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
+                    .fromApp(appId).makePermanent().withFlag(ForwardingObjective.Flag.SPECIFIC)
+                    .withPriority(100)
+                    .withSelector(DefaultTrafficSelector.builder()
+                            .matchInPort(PortNumber.portNumber(1))
+                            .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
+                            .matchIPSrc(Ip4Prefix.valueOf("192.168.0.0/16"))
+                            .matchIPDst(Ip4Prefix.valueOf("192.168.0.0/16"))
+                            .matchIPProtocol((byte) IpProtocol.TCP.value())
+                            .matchTcpDst(TpPort.tpPort(502))
+                            .build())
+                    .withTreatment(DefaultTrafficTreatment.builder()
+                            .setOutput(PortNumber.portNumber(2))
+                            .setOutput(PortNumber.CONTROLLER)
+                            .build())
+                    .add()
+            );
+            // End project-specific flows
 
             log.info("Initialized flows on switch: " + device.id());
         }
@@ -352,15 +339,16 @@ public class ReactiveDefense implements ReactiveDefenseService {
             log.debug("Modbus packet: " + modbusPkt);
 
             /*
-             This is Modbus write packets sent to OpenPLC, OpenPLC responses are ignored.
+             We consider Modbus write packets sent to OpenPLC, OpenPLC responses are ignored.
              We analyze frequency of Modbus write packets sent to OpenPLC,
              if frequency > 10pkt/s, then we think this is a DoS attack on manipulating the OpenPLC.
             */
+            Modbus modbus = new Modbus(modbusPkt.getData());
             if (tcpPkt.getDestinationPort() != 502 ||
-                    ModbusUtil.getFunctionCode(modbusPkt.getData()) != ModbusFunctionCode.WRITE_SINGLE_REGISTER) {
+                    modbus.functionCode != ModbusFunctionCode.WRITE_SINGLE_REGISTER) {
                 return;
             }
-            log.debug("Modbus write command: " + ModbusUtil.getContent(modbusPkt.getData()));
+            log.debug("Modbus write command: " + modbus);
 
             /*
              Stores ethPkt for frequency analysis.
@@ -396,79 +384,145 @@ public class ReactiveDefense implements ReactiveDefenseService {
     }
 
     /**
-     * Parse Modbus data.
+     * Parse and interpret Modbus data.
+     * We focus on Modbus write data, in other words,
+     * Modbus packet with FunctionCode == WRITE_SINGLE_REGISTER
      */
-    private static class ModbusUtil implements Serializable {
+    private class Modbus implements Serializable {
+        private ModbusFunctionCode functionCode = ModbusFunctionCode.UNKNOWN;
+        private ModbusReferenceNumber referenceNumber = ModbusReferenceNumber.UNKNOWN;
+        private ModbusData data = ModbusData.UNKNOWN;
 
-        public static ModbusFunctionCode getFunctionCode(byte[] data) {
-            // the 8th byte is the function code
+        /**
+         * Default constructor.
+         */
+        public Modbus() {
+            super();
+        }
+
+        /**
+         * Constructor to interpret Modbus packet.
+         * @param data Modbus packet in byte[]
+         */
+        public Modbus(byte[] data) {
             switch (data[7]) {
                 case 1:
-                    return ModbusFunctionCode.READ_COILS;
+                    functionCode = ModbusFunctionCode.READ_COILS;
+                    break;
                 case 3:
-                    return ModbusFunctionCode.READ_HOLDING_REGISTERS;
+                    functionCode = ModbusFunctionCode.READ_HOLDING_REGISTERS;
+                    break;
                 case 6:
-                    return ModbusFunctionCode.WRITE_SINGLE_REGISTER;
-                default:
-                    return ModbusFunctionCode.UNKNOWN;
-            }
-        }
-
-        public static ModbusReferenceNumber getReferenceNumber(byte[] data) {
-            /*
-             The 9th and 10th bytes are the reference number,
-             however the 9th byte is always 0 given function code 6,
-             so we only consider the 10th byte.
-            */
-            switch (data[9]) {
-                case 2:
-                    return ModbusReferenceNumber.SET_POINT;
-                case 4:
-                    return ModbusReferenceNumber.MODE;
-                case 5:
-                    return ModbusReferenceNumber.CONTROL;
-                default:
-                    return ModbusReferenceNumber.UNKNOWN;
-            }
-        }
-
-        public static ModbusData getData(byte[] data) {
-
-            // TODO return SetPoint decimal value
-            /*
-             The 11th and 12th bytes are data bytes,
-             for ReferenceNumber==SetPoint, they are hex value of point (e.g., 0x2710 == 10000),
-             however the range of byte is -128 ~ 127, so we can't estimate exact point value.
-             As for other ReferenceNumber, we only consider the 12th byte.
-            */
-            switch (getReferenceNumber(data)) {
-                case SET_POINT:
-                    return ModbusData.VALUE;
-                case MODE:
-                    switch (data[11]) {
-                        case 0:
-                            return ModbusData.AUTO;
-                        case 1:
-                            return ModbusData.MANUAL;
+                    functionCode = ModbusFunctionCode.WRITE_SINGLE_REGISTER;
+                    switch (data[9]) {
+                        case 2:
+                            referenceNumber = ModbusReferenceNumber.SET_POINT;
+                            this.data = ModbusData.VALUE;
+                            break;
+                        case 4:
+                            referenceNumber = ModbusReferenceNumber.MODE;
+                            switch (data[11]) {
+                                case 0:
+                                    this.data = ModbusData.AUTO;
+                                    break;
+                                case 1:
+                                    this.data = ModbusData.MANUAL;
+                                    break;
+                                default:
+                                    break;
+                            }
+                        case 5:
+                            referenceNumber = ModbusReferenceNumber.CONTROL;
+                            switch (data[11]) {
+                                case 0:
+                                    this.data = ModbusData.HEATER_OFF;
+                                    break;
+                                case 1:
+                                    this.data = ModbusData.HEATER_ON;
+                                    break;
+                                default:
+                                    break;
+                            }
                         default:
-                            return null;
+                            break;
                     }
-                case CONTROL:
-                    switch (data[11]) {
-                        case 0:
-                            return ModbusData.HEATER_OFF;
-                        case 1:
-                            return ModbusData.HEATER_ON;
-                        default:
-                            return null;
-                    }
-                case UNKNOWN: default:
-                    return ModbusData.UNKNOWN;
+                default:
+                    break;
             }
         }
 
-        public static String getContent(byte[] data) {
-            return getFunctionCode(data) + " " + getReferenceNumber(data) + " " + getData(data);
+        @Override
+        public String toString() {
+            return functionCode + " " + referenceNumber + " " + this.data;
+        }
+    }
+
+    /**
+     * Monitor Modbus write packets traffic.
+     * If Modbus write packets frequency >= 10pkt/s, then
+     * deploy flows to drop Modbus write packets from the highest occurrence srcMACAddr.
+     */
+    private class ModbusTrafficMonitor implements Runnable {
+        @Override
+        public void run() {
+            while (!Thread.interrupted()) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+
+                if (ethList.size() >= 10) {
+                    log.error("Modbus DoS detected with a frequency of " + ethList.size() + "pkt/s");
+
+                    /*
+                     Use HashMap to get the highest occurrence srcMACAddress in all DoS packets,
+                     usually it is the attacker's MAC address.
+                     */
+                    HashMap<MacAddress, Integer> map = new HashMap<>();
+                    for (Ethernet ethPkt : ethList) {
+                        if (map.containsKey(ethPkt.getSourceMAC())) {
+                            int count = map.get(ethPkt.getSourceMAC());
+                            map.put(ethPkt.getSourceMAC(), count + 1);
+                        } else {
+                            map.put(ethPkt.getSourceMAC(), 1);
+                        }
+                    }
+
+                    int maxCount = Collections.max(map.values());
+                    MacAddress attacker = MacAddress.NONE;
+                    for (Map.Entry<MacAddress, Integer> entry : map.entrySet()) {
+                        if (entry.getValue() == maxCount) {
+                            attacker = entry.getKey();
+                        }
+                    }
+
+                    /*
+                     Temporarily blocks Dos Modbus packets.
+                     The SrcMAC approach is more useful than SrcIP
+                     */
+                    for (Device device : availableDevices) {
+                        flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
+                                .fromApp(appId).makeTemporary(10).withFlag(ForwardingObjective.Flag.SPECIFIC)
+                                .withPriority(10000)
+                                .withSelector(DefaultTrafficSelector.builder()
+                                        .matchEthSrc(attacker)
+                                        .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
+                                        .matchIPDst(Ip4Prefix.valueOf("192.168.0.0/16"))
+                                        .matchIPProtocol((byte) IpProtocol.TCP.value())
+                                        .matchTcpDst(TpPort.tpPort(502))
+                                        .build())
+                                .withTreatment(DefaultTrafficTreatment.builder()
+                                        .drop()
+                                        .build())
+                                .add()
+                        );
+                        log.info("Defense flow deployed on " + device.id());
+                    }
+                }
+
+                ethList.clear();
+            }
         }
     }
 }
