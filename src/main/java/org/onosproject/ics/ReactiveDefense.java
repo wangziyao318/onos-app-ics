@@ -189,11 +189,14 @@ public class ReactiveDefense implements ReactiveDefenseService {
                     .add()
             );
 
-            /*
-             By default, drop all requests to Modbus server.
-             Since OpenPLC server won't send message deliberately, we don't need to consider tcpSrcPort==502.
-             Drops all Modbus/TCP traffic whose dstTcpPort==502, with priority 50.
-             */
+            /* Start Traditional Countermeasure
+
+            Compared with adaptive countermeasure, the traditional countermeasure can't defense attacks
+            made by an attacker within the same subnet 172.16.50.1/24 of Scada-LTS.
+
+            // By default, drop all requests to Modbus server.
+            // Since OpenPLC server won't send message deliberately, we don't need to consider tcpSrcPort==502.
+            // Drops all Modbus/TCP traffic whose dstTcpPort==502, with priority 50.
             flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
                     .fromApp(appId).makePermanent().withFlag(ForwardingObjective.Flag.SPECIFIC)
                     .withPriority(50)
@@ -208,11 +211,9 @@ public class ReactiveDefense implements ReactiveDefenseService {
                     .add()
             );
 
-            /*
-             Allows all modbus/TCP traffic whose IP is trusted, with priority 100.
-             From ScadaLTS 172.16.50.0/24 to OpenPLC 192.168.0.0/16 whose tcpDstPort==502.
-             (tcpSrcPort==502 is not blocked)
-            */
+            // Allows all modbus/TCP traffic whose IP is in trusted subnets, with priority 100.
+            // From ScadaLTS 172.16.50.0/24 to OpenPLC 192.168.0.0/16 whose tcpDstPort==502.
+            // (tcpSrcPort==502 is not blocked)
             flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
                     .fromApp(appId).makePermanent().withFlag(ForwardingObjective.Flag.SPECIFIC)
                     .withPriority(100)
@@ -231,48 +232,7 @@ public class ReactiveDefense implements ReactiveDefenseService {
                     .add()
             );
 
-            /*
-             Start project-specific flows
-
-             Allows the attacker's modbus/TCP traffic, with priority 100.
-             For Attack & Defense project only, it's advised to remove these 2 flows in normal usage.
-             From any OpenPLC 192.168.0.0/16 to OpenPLC 192.168.0.0/16 whose tcpDstPort==502.
-            */
-            flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
-                    .fromApp(appId).makePermanent().withFlag(ForwardingObjective.Flag.SPECIFIC)
-                    .withPriority(100)
-                    .withSelector(DefaultTrafficSelector.builder()
-                            .matchInPort(PortNumber.portNumber(2))
-                            .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
-                            .matchIPSrc(Ip4Prefix.valueOf("192.168.0.0/16"))
-                            .matchIPDst(Ip4Prefix.valueOf("192.168.0.0/16"))
-                            .matchIPProtocol((byte) IpProtocol.TCP.value())
-                            .matchTcpDst(TpPort.tpPort(502))
-                            .build())
-                    .withTreatment(DefaultTrafficTreatment.builder()
-                            .setOutput(PortNumber.portNumber(1))
-                            .setOutput(PortNumber.CONTROLLER)
-                            .build())
-                    .add()
-            );
-            flowObjectiveService.forward(device.id(), DefaultForwardingObjective.builder()
-                    .fromApp(appId).makePermanent().withFlag(ForwardingObjective.Flag.SPECIFIC)
-                    .withPriority(100)
-                    .withSelector(DefaultTrafficSelector.builder()
-                            .matchInPort(PortNumber.portNumber(1))
-                            .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
-                            .matchIPSrc(Ip4Prefix.valueOf("192.168.0.0/16"))
-                            .matchIPDst(Ip4Prefix.valueOf("192.168.0.0/16"))
-                            .matchIPProtocol((byte) IpProtocol.TCP.value())
-                            .matchTcpDst(TpPort.tpPort(502))
-                            .build())
-                    .withTreatment(DefaultTrafficTreatment.builder()
-                            .setOutput(PortNumber.portNumber(2))
-                            .setOutput(PortNumber.CONTROLLER)
-                            .build())
-                    .add()
-            );
-            // End project-specific flows
+            End Traditional Countermeasure */
 
             log.info("Initialized flows on switch: " + device.id());
         }
