@@ -33,10 +33,10 @@
 
     <properties>
         <onos.app.name>org.onosproject.ics</onos.app.name>
-        <onos.app.title>AAA ICS App</onos.app.title>
+        <onos.app.title>ICS Guard</onos.app.title>
         <onos.app.origin>Ziyao Wang</onos.app.origin>
         <onos.app.category>Security</onos.app.category>
-        <onos.app.url>https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3</onos.app.url>
+        <onos.app.url>https://github.com/wangziyao318/onos-app-ics</onos.app.url>
         <onos.app.readme>An ONOS App for industrial control system.</onos.app.readme>
     </properties>
 
