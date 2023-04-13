@@ -130,7 +130,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
     /**
      * Timeout period of guard flow entries measured in seconds.
      */
-    private static final int GUARD_FLOW_TIMEOUT = 10;
+    private static final int GUARD_FLOW_TIMEOUT = 30;
 
     /**
      * The cycle of the traffic monitor measured in milliseconds.
@@ -221,7 +221,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
         /*
          For garbage collection purposes.
          */
-        configService.unregisterProperties(getClass(), false);
+        configService.unregisterProperties(getClass(), true);
 
         t.interrupt();
         flowRuleService.removeFlowRulesById(appId);
