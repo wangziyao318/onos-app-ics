@@ -36,6 +36,7 @@ public interface ReactiveDefenceService {
      *
      * @param deviceId device ID
      * @param ip4 src IPv4 address
+     * @param dstPort dst TCP port
      */
-    void addGuardFlow(DeviceId deviceId, Ip4Address ip4);
+    void addGuardFlow(DeviceId deviceId, Ip4Address ip4, int dstPort);
 }

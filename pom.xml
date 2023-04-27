@@ -25,7 +25,7 @@
 
     <groupId>org.onosproject.ics</groupId>
     <artifactId>onos-app-ics</artifactId>
-    <version>2.7.0-SNAPSHOT</version>
+    <version>2.7.0</version>
     <packaging>bundle</packaging>
 
     <description>An ONOS App for industrial control system</description>
@@ -33,7 +33,7 @@
 
     <properties>
         <onos.app.name>org.onosproject.ics</onos.app.name>
-        <onos.app.title>ICS Guard</onos.app.title>
+        <onos.app.title>An ICS Guard</onos.app.title>
         <onos.app.origin>Ziyao Wang</onos.app.origin>
         <onos.app.category>Security</onos.app.category>
         <onos.app.url>https://github.com/wangziyao318/onos-app-ics</onos.app.url>

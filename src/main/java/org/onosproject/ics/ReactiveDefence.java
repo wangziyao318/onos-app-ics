@@ -108,9 +108,20 @@ public class ReactiveDefence implements ReactiveDefenceService {
     private ConcurrentHashMap<Ip4Address, Integer> remoteHosts;
 
     /**
-     * A thread handler to start and interrupt the runnable traffic monitor.
+     * A thread-safe hashmap to log and count IPv4 addresses of
+     * the remote hosts sending Modbus/TCP packets with "write" commands.
      */
-    private Thread t;
+    private ConcurrentHashMap<Ip4Address, ConcurrentHashMap<Float, Integer>> clients;
+
+    /**
+     * A thread handler to start and interrupt the runnable Modbus traffic monitor.
+     */
+    private Thread modbusThread = new Thread(new ModbusTrafficMonitor());
+
+    /**
+     * A thread handler to start and interrupt the runnable Http traffic monitor.
+     */
+    private Thread httpThread = new Thread(new HttpTrafficMonitor());
 
     /*
      These parameters can be tuned to improve defence performance.
@@ -133,19 +144,29 @@ public class ReactiveDefence implements ReactiveDefenceService {
     private static final int GUARD_FLOW_TIMEOUT = 30;
 
     /**
-     * The cycle of the traffic monitor measured in milliseconds.
+     * The cycle of modbus traffic monitor measured in milliseconds.
      */
-    private static final int MONITOR_CYCLE = 500;
+    private static final int MODBUS_MONITOR_CYCLE = 500;
 
     /**
-     * A threshold of number of packets to determine DoS attack per cycle.
+     * The cycle of http traffic monitor measured in milliseconds.
+     */
+    private static final int HTTP_MONITOR_CYCLE = 10000;
+
+    /**
+     * A threshold of number of modbus packets to determine DoS attack per cycle.
      */
     private static final int DOS_THRESHOLD_PER_CYCLE = 5;
 
     /**
+     * A threshold of number of http packets to determine DoS attack per cycle.
+     */
+    private static final int HTTP_THRESHOLD_PER_CYCLE = 3;
+
+    /**
      * A DoS threshold is calculated using two parameters above in pkt/s.
      */
-    private static final double DOS_THRESHOLD = DOS_THRESHOLD_PER_CYCLE / (MONITOR_CYCLE / 1000.);
+    private static final double DOS_THRESHOLD = DOS_THRESHOLD_PER_CYCLE / (MODBUS_MONITOR_CYCLE / 1000.);
 
     /*
      Services from ONOS subsystems are called here for use.
@@ -177,6 +198,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
         appId = coreService.registerApplication("org.onosproject.ics");
 
         remoteHosts = new ConcurrentHashMap<>();
+        clients = new ConcurrentHashMap<>();
         availableDevices = (Collection<Device>) deviceService.getAvailableDevices(Device.Type.SWITCH);
 
         /*
@@ -206,10 +228,10 @@ public class ReactiveDefence implements ReactiveDefenceService {
         log.info("DoS threshold == " + DOS_THRESHOLD + " pkt/s");
 
         /*
-         Start the traffic monitor as a new thread.
+         Start two traffic monitors.
          */
-        t = new Thread(new ModbusTrafficMonitor());
-        t.start();
+        modbusThread.start();
+        httpThread.start();
     }
 
     /**
@@ -223,7 +245,8 @@ public class ReactiveDefence implements ReactiveDefenceService {
          */
         configService.unregisterProperties(getClass(), true);
 
-        t.interrupt();
+        modbusThread.interrupt();
+        httpThread.interrupt();
         flowRuleService.removeFlowRulesById(appId);
         packetService.removeProcessor(packetSelector);
         packetSelector = null;
@@ -231,6 +254,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
         deviceListener = null;
         availableDevices = null;
         remoteHosts = null;
+        clients = null;
 
         log.info(" ___ ____ ____     ____ _   _   _    ____  ____");
         log.info("|_ _/ ___/ ___|   / ___| | | | / \\  |  _ \\|  _ \\");
@@ -317,7 +341,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
     }
 
     @Override
-    public void addGuardFlow(DeviceId deviceId, Ip4Address ip4) {
+    public void addGuardFlow(DeviceId deviceId, Ip4Address ip4, int dstPort) {
         flowObjectiveService.forward(deviceId, DefaultForwardingObjective.builder()
                 .fromApp(appId).makeTemporary(GUARD_FLOW_TIMEOUT).withFlag(ForwardingObjective.Flag.SPECIFIC)
                 .withPriority(GUARD_FLOW_PRIORITY)
@@ -325,7 +349,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
                         .matchEthType(EthType.EtherType.IPV4.ethType().toShort())
                         .matchIPSrc(ip4.toIpPrefix())
                         .matchIPProtocol((byte) IpProtocol.TCP.value())
-                        .matchTcpDst(TpPort.tpPort(502))
+                        .matchTcpDst(TpPort.tpPort(dstPort))
                         .build())
                 .withTreatment(DefaultTrafficTreatment.builder()
                         .drop()
@@ -386,58 +410,79 @@ public class ReactiveDefence implements ReactiveDefenceService {
              So, a Modbus/TCP packet with dstPort == 502 should be a request
              from a Scada-LTS client to an OpenPLC server.
              */
-            if (tcpPkt.getDestinationPort() != 502 || !(tcpPkt.getPayload() instanceof Data)) {
-                return;
-            }
-            Data data = (Data) tcpPkt.getPayload();
+            if (tcpPkt.getDestinationPort() == 502 && tcpPkt.getPayload() instanceof Data) {
+                Data data = (Data) tcpPkt.getPayload();
 
-            /*
-             Check if the Modbus/TCP request is tampered.
+                /*
+                 Check if the Modbus/TCP request is tampered.
 
-             If both srcPort and dstPort are 502, then the Modbus/TCP packet may be
-             either a request from attacker or a response from OpenPLC.
-             However, if we drop all traffic matching srcIP in this packet and dstTcpPort == 502,
-             then this attack is blocked effectively without harm to normal OpenPLC reply to Scada-LTS.
-             (a normal OpenPLC reply to Scada-LTS has dstPort between 32768 and 60999)
+                 If both srcPort and dstPort are 502, then the Modbus/TCP packet may be
+                 either a request from attacker or a response from OpenPLC.
+                 However, if we drop all traffic matching srcIP in this packet and dstTcpPort == 502,
+                 then this attack is blocked effectively without harm to normal OpenPLC reply to Scada-LTS.
+                 (a normal OpenPLC reply to Scada-LTS has dstPort between 32768 and 60999)
 
-             Note that we can't deal with IP spoofing, so there's a risk when
-             attacker uses the IP of a victim Scada-LTS to perform the attack.
-             */
-            if (tcpPkt.getSourcePort() == 502) {
-                log.error(Ip4Address.valueOf(ip4Pkt.getSourceAddress()) +
-                        " sent a malicious Modbus/TCP packet with dstTcpPort == 502 && srcTcpPort == 502");
-                for (Device device : availableDevices) {
-                    addGuardFlow(device.id(), Ip4Address.valueOf(ip4Pkt.getSourceAddress()));
-                    log.warn("A guard flow is deployed on " + device.id());
+                 Note that we can't deal with IP spoofing, so there's a risk when
+                 attacker uses the IP of a victim Scada-LTS to perform the attack.
+                 */
+                if (tcpPkt.getSourcePort() == 502) {
+                    log.error(Ip4Address.valueOf(ip4Pkt.getSourceAddress()) +
+                            " sent a malicious Modbus/TCP packet with dstTcpPort == 502 && srcTcpPort == 502");
+                    for (Device device : availableDevices) {
+                        addGuardFlow(device.id(), Ip4Address.valueOf(ip4Pkt.getSourceAddress()), 502);
+                        log.warn("A guard flow is deployed on " + device.id());
+                    }
+                    return;
                 }
-                return;
-            }
+
+                /*
+                 Ensure a Modbus/TCP packet with valid data.
+                 */
+                if (data.getData().length == 0) {
+                    return;
+                }
+                String modbusData = Ethernet.bytesToHex(data.getData());
+
+                /*
+                 Ensure a Modbus/TCP packet with a "write" command.
+
+                 We only inspect Modbus/TCP packet with function code "0x06" in hex,
+                 which is the command of "WRITE_SINGLE_REGISTER", because
+                 common Modbus/TCP packets with "read" commands can't do any harm to OpenPLC.
+                 */
+                if (Integer.decode("0x" + modbusData.substring(14, 16)) != 6) {
+                    return;
+                }
+
+                /*
+                 We log the IPv4 address of all Modbus/TCP packets with "write" commands for further inspection.
+                 Duplicated IPv4 addresses are counted in number using a thread-safe hashmap.
+                 */
+                Integer i = remoteHosts.containsKey(srcIP4) ?
+                        remoteHosts.put(srcIP4, remoteHosts.get(srcIP4) + 1) : remoteHosts.put(srcIP4, 1);
 
             /*
-             Ensure a Modbus/TCP packet with valid data.
+             Ensure a HTTP request to port 8080.
              */
-            if (data.getData().length == 0) {
-                return;
+            } else if (tcpPkt.getDestinationPort() == 8080) {
+
+                /*
+                 We only inspect (PSH + ACK) flag for HTTP GET/POST.
+                 They have flag value 0x18 == 24.
+                 */
+                if (tcpPkt.getFlags() == (short) 24) {
+                    if (!clients.containsKey(srcIP4)) {
+                        clients.put(srcIP4, new ConcurrentHashMap<>());
+                    }
+
+                    float key = (float) (Long.decode("0x" + Ethernet.bytesToHex(tcpPkt.getOptions())
+                            .substring(8, 16)) / 1000.);
+
+                    Integer i = clients.get(srcIP4).containsKey(key) ?
+                            clients.get(srcIP4).put(key, clients.get(srcIP4).get(key) + 1) :
+                            clients.get(srcIP4).put(key, 1);
+                }
             }
-            String modbusData = Ethernet.bytesToHex(data.getData());
-
-            /*
-             Ensure a Modbus/TCP packet with a "write" command.
-
-             We only inspect Modbus/TCP packet with function code "0x06" in hex,
-             which is the command of "WRITE_SINGLE_REGISTER", because
-             common Modbus/TCP packets with "read" commands can't do any harm to OpenPLC.
-             */
-            if (Integer.decode("0x" + modbusData.substring(14, 16)) != 6) {
-                return;
-            }
-
-            /*
-             We log the IPv4 address of all Modbus/TCP packets with "write" commands for further inspection.
-             Duplicated IPv4 addresses are counted in number using a thread-safe hashmap.
-             */
-            Integer i = remoteHosts.containsKey(srcIP4) ?
-                    remoteHosts.put(srcIP4, remoteHosts.get(srcIP4) + 1) : remoteHosts.put(srcIP4, 1);
         }
     }
 
@@ -475,7 +520,7 @@ public class ReactiveDefence implements ReactiveDefenceService {
         public void run() {
             while (!Thread.interrupted()) {
                 try {
-                    Thread.sleep(MONITOR_CYCLE);
+                    Thread.sleep(MODBUS_MONITOR_CYCLE);
                 } catch (InterruptedException e) {
                     return;
                 }
@@ -486,14 +531,15 @@ public class ReactiveDefence implements ReactiveDefenceService {
                  */
                 for (Map.Entry<Ip4Address, Integer> entry : remoteHosts.entrySet()) {
                     if (entry.getValue() > DOS_THRESHOLD_PER_CYCLE) {
-                        log.error(entry.getKey() + " performed a " + entry.getValue() / (MONITOR_CYCLE / 1000.) +
+                        log.error(entry.getKey() + " performed a " +
+                                entry.getValue() / (MODBUS_MONITOR_CYCLE / 1000.) +
                                 " pkt/s DoS attack on Modbus/TCP.");
 
                         /*
                          Drop all traffic with this source IPv4 to dstTcpPort 502.
                          */
                         for (Device device : availableDevices) {
-                            addGuardFlow(device.id(), entry.getKey());
+                            addGuardFlow(device.id(), entry.getKey(), 502);
                             log.warn("A guard flow is deployed on " + device.id());
                         }
                     }
@@ -503,6 +549,43 @@ public class ReactiveDefence implements ReactiveDefenceService {
                  Empty remoteHosts for the next cycle.
                  */
                 remoteHosts.clear();
+            }
+        }
+    }
+
+    /**
+     * The HTTP traffic monitor checks if there are numerous PSH+ACK packets
+     * from a single IP with the same timestamp.
+     */
+    private class HttpTrafficMonitor implements Runnable {
+        @Override
+        public void run() {
+            while (!Thread.interrupted()) {
+                try {
+                    Thread.sleep(HTTP_MONITOR_CYCLE);
+                } catch (InterruptedException e) {
+                    return;
+                }
+
+                for (Map.Entry<Ip4Address, ConcurrentHashMap<Float, Integer>> entry : clients.entrySet()) {
+                    ConcurrentHashMap<Float, Integer> timestampNum = entry.getValue();
+                    for (Map.Entry<Float, Integer> timestampEntry : timestampNum.entrySet()) {
+                        if (timestampEntry.getValue() > HTTP_THRESHOLD_PER_CYCLE) {
+                            /*
+                             Drop all traffic with this source IPv4 to dstTcpPort 8080.
+                             */
+                            for (Device device : availableDevices) {
+                                addGuardFlow(device.id(), entry.getKey(), 8080);
+                                log.warn("A guard flow is deployed on " + device.id());
+                            }
+                        }
+                    }
+                }
+
+                /*
+                 Empty clients for the next cycle.
+                 */
+                clients.clear();
             }
         }
     }
