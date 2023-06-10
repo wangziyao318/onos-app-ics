@@ -1,6 +1,6 @@
 # onos-app-ics
 
-This is an ONOS app component designed to defend both [injection attack on Modbus/TCP](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/modbus/attack/README.md) and [Slowloris on HTTP](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/http/attack/README.md).
+This is an ONOS app component designed to not only provide normal operation of [the ICS network](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/network/ics/README.md#ics-network) but also defend both [injection attack on Modbus/TCP](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/modbus/attack/README.md) and [Slowloris on HTTP](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/http/attack/README.md). This one is not compatible with "An ICS Forwarding" and they can't be both activated.
 
 ## Usage
 
