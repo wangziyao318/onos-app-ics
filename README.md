@@ -1,6 +1,6 @@
 # onos-app-ics
 
-This is an ONOS app component designed to only provide normal operation of [the ICS network](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/network/ics/README.md#ics-network). This app does not defend any attack. It only forward all traffic through Open vSwitches so that these Open vSwitches are transparent to other nodes in the ICS network.
+This is an ONOS app component designed to only provide normal operation of [the ICS network](https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3/blob/master/network/ics/README.md#ics-network). This app does not defend any attack. It only forward all traffic through Open vSwitches so that these Open vSwitches are transparent to other nodes in the ICS network. This one is not compatible with "An ICS Guard" and they can't be both activated.
 
 ## Usage
 
