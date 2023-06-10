@@ -1,4 +1,4 @@
 /**
  * ONOS application archetype.
  */
-package org.onosproject.ics;
+package org.onosproject.icsdefault;

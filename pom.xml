@@ -23,7 +23,7 @@
         <version>2.7.0</version>
     </parent>
 
-    <groupId>org.onosproject.ics</groupId>
+    <groupId>org.onosproject.icsdefault</groupId>
     <artifactId>onos-app-ics</artifactId>
     <version>2.7.0</version>
     <packaging>bundle</packaging>
@@ -32,10 +32,10 @@
     <url>https://github.com/sfl0r3nz05/OT-NWbasedOnGNS3</url>
 
     <properties>
-        <onos.app.name>org.onosproject.ics</onos.app.name>
-        <onos.app.title>An ICS Guard</onos.app.title>
+        <onos.app.name>org.onosproject.icsdefault</onos.app.name>
+        <onos.app.title>An ICS Forwarding</onos.app.title>
         <onos.app.origin>Ziyao Wang</onos.app.origin>
-        <onos.app.category>Security</onos.app.category>
+        <onos.app.category>Routing</onos.app.category>
         <onos.app.url>https://github.com/wangziyao318/onos-app-ics</onos.app.url>
         <onos.app.readme>An ONOS App for industrial control system.</onos.app.readme>
     </properties>

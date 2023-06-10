@@ -1,6 +1,5 @@
-package org.onosproject.ics;
+package org.onosproject.icsdefault;
 
-import org.onlab.packet.Ip4Address;
 import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
 
@@ -9,7 +8,7 @@ import java.util.Collection;
 /**
  * The interface provides definitions of methods for the app component to implement.
  */
-public interface ReactiveDefenceService {
+public interface IcsForwardingService {
 
     /**
      * Initialize normal flows in OVSes.
@@ -29,14 +28,4 @@ public interface ReactiveDefenceService {
      * @param outPort output port
      */
     void addNormalFlow(DeviceId deviceId, int inPort, int outPort);
-
-    /**
-     * A utility method to add a flow entry on given OVS
-     * dropping all traffic with the given srcIP to dstTcpPort 502.
-     *
-     * @param deviceId device ID
-     * @param ip4 src IPv4 address
-     * @param dstPort dst TCP port
-     */
-    void addGuardFlow(DeviceId deviceId, Ip4Address ip4, int dstPort);
 }
